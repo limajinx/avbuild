@@ -1,0 +1,38 @@
+name: Android playback candidate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install pinned Android tools
+        run: sdkmanager 'ndk;28.2.13676358' 'cmake;3.31.5'
+      - name: Install Meson
+        run: |
+          python3 -m venv .playback/venv
+          .playback/venv/bin/pip install meson==1.7.2
+      - name: Build both ARM ABIs
+        run: |
+          python3 playback/build.py \
+            --ndk "$ANDROID_HOME/ndk/28.2.13676358" \
+            --cmake-bin "$ANDROID_HOME/cmake/3.31.5/bin" \
+            --meson .playback/venv/bin/meson
+      - name: Audit configured components and ELF dependencies
+        run: |
+          python3 playback/audit.py \
+            --readelf "$ANDROID_HOME/ndk/28.2.13676358/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: android-playback-candidate-${{ github.sha }}
+          if-no-files-found: error
+          path: |
+            .playback/output/*/lib/libffmpeg.so
+            .playback/output/*/evidence/
+            .playback/output/*.json

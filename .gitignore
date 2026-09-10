@@ -10,3 +10,5 @@ sdk-*/
 sysroot
 /winsdk*
 /msvc*
+/.playback/
+/playback/__pycache__/
