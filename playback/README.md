@@ -49,7 +49,7 @@ filters and protocols. Exact enabled component sets are asserted by `audit.py`.
   FFmpeg's HLS configure dependencies also enable AAC, AC3/EAC3 demuxers and the
   AC3 parser. AC3/EAC3 decoders remain disabled; auxiliary demuxing is not an
   extension of the promised audio codec contract.
-- **Required:** file, HTTP, HTTPS, TCP, TLS, crypto and zlib. Encrypted HLS is
+- **Required:** file, HTTP, HTTPS, HTTP proxy CONNECT (`httpproxy`), TCP, TLS, crypto and zlib. Encrypted HLS is
   configured but not yet runtime-tested; redirects and non-HTTP live protocols
   need media-contract and runtime validation.
 - **Candidate playback filters:** scale/format/aformat/aresample for conversion;

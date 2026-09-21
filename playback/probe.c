@@ -1,5 +1,6 @@
 /* Run on Android against the candidate library, never inside the production app. */
 #include <stdio.h>
+#include <string.h>
 #include <dlfcn.h>
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
@@ -61,6 +62,17 @@ done:
 }
 
 int main(int argc, char **argv) {
+    void *protocol_cursor = NULL;
+    const char *protocol;
+    int has_http_proxy = 0;
+    while ((protocol = avio_enum_protocols(&protocol_cursor, 0))) {
+        if (strcmp(protocol, "httpproxy") == 0) has_http_proxy = 1;
+    }
+    if (!has_http_proxy) {
+        fprintf(stderr, "Missing HTTP CONNECT proxy protocol\n");
+        return 6;
+    }
+    puts("PASS HTTP CONNECT proxy protocol registered");
     void *cursor = NULL;
     const AVCodec *codec;
     int decoders = 0;

@@ -12,7 +12,7 @@ EXPECTED = {
     'DEMUXER': set('aac ac3 eac3 flv hls matroska mov mpegts'.split()),
     'PARSER': set('aac aac_latm ac3 amr av1 h264 hevc mlp opus vorbis vp8 vp9'.split()),
     'FILTER': set('aformat anull aresample atempo volume format null scale'.split()),
-    'PROTOCOL': set('crypto file http https tcp tls'.split()),
+    'PROTOCOL': set('crypto file http https httpproxy tcp tls'.split()),
 }
 
 

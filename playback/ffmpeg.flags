@@ -25,4 +25,4 @@
 --enable-demuxer=mov,hls,mpegts,flv,matroska,aac
 --enable-parser=h264,hevc,aac,aac_latm,av1,vp8,vp9,opus,vorbis
 --enable-filter=buffer,buffersink,abuffer,abuffersink,null,anull,format,aformat,scale,aresample,atempo,volume
---enable-protocol=file,http,https,tcp,tls,crypto
+--enable-protocol=file,http,https,httpproxy,tcp,tls,crypto
