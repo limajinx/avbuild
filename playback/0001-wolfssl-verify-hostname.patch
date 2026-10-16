@@ -1,0 +1,16 @@
+--- a/libavformat/tls_wolfssl.c
++++ b/libavformat/tls_wolfssl.c
+@@ -179,6 +179,13 @@
+         goto fail;
+     }
+ 
++    if (c->verify && !c->listen &&
++        wolfSSL_check_domain_name(p->ssl, c->host) != WOLFSSL_SUCCESS) {
++        av_log(h, AV_LOG_ERROR, "Unable to configure TLS hostname verification\n");
++        ret = AVERROR(EIO);
++        goto fail;
++    }
++
+     wolfSSL_SetIOReadCtx(p->ssl, c->tcp);
+     wolfSSL_SetIOWriteCtx(p->ssl, c->tcp);
+ 

@@ -127,3 +127,37 @@ The test server and reverse mappings were stopped after validation.
   ABIs, pin the final MDK artifact URL/SHA-256 and run the full playback matrix.
 - Bitstream-filter narrowing remains a possible follow-up; general API symbols
   cannot be pruned safely based on component registrations alone.
+
+## TLS validation update (2026-10-16)
+
+The playback recipe now applies the tracked
+`0001-wolfssl-verify-hostname.patch` after the pinned upstream patches. For verified
+client TLS connections, it configures `wolfSSL_check_domain_name` before the
+handshake and fails if configuring hostname verification fails. Certificate
+verification remains enabled by the caller. The patch is checked independently
+of the historical `.patched` marker so existing work directories receive it;
+reverse checks precede forward application to avoid duplicate insertion.
+
+wolfSSL is explicitly built with filesystem CA loading, SNI and alternate trusted
+certificate chains. Alternate chains let a peer chain terminate at a locally
+trusted CA when the server also sends a cross-signed version with an unavailable
+issuer. This does not add the unverified cross-certificate to the trust store;
+the leaf must still validate to a trusted CA and match the requested hostname.
+These options are required by the SDK packaging manifest. No codec, demuxer,
+filter or protocol flags changed for this fix.
+
+For an already configured build with the same configuration and these wolfSSL
+features installed, add `--incremental-only` to the build command. It checks the
+saved configure arguments and required wolfSSL options, then runs make and the
+combined-library linker without rebuilding dependencies or reconfiguring FFmpeg.
+Use the regular command when dependency features or configure arguments change.
+
+On the Mi 10, isolated native probes for both ARM ABIs validated the public
+`video.88shorts.com` MP4 through the existing system HTTP proxy, using both the
+exported Android root bundle and its standalone GTS Root R4. Each case decoded
+H.264/AAC, sought, and completed three open/seek/dispose cycles. Controlled local
+HTTPS fixtures also accepted a matching hostname with the trusted CA and rejected
+an unknown CA, a wrong SAN (even with a matching common name), and an expired
+leaf. These are native transport/decode checks; Flutter rendering and audible
+playback remain separate application checks. Fixture private keys, device test
+directories and the temporary adb reverse mapping were removed after testing.

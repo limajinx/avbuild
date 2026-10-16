@@ -22,6 +22,7 @@ NDK_VERSION = '28.2.13676358'
 AVBUILD_REVISION = '825de1a509a6321c8f7c3700688badecf77c9e69'
 # Android playback patches from the pinned upstream avbuild revision. Do not
 # import desktop, encoder or subtitle patches from the generic build pipeline.
+PLAYBACK_PATCHES = ['0001-wolfssl-verify-hostname.patch']
 PATCHES = ['0005-', '0006-', '0008-', '0013-', '0017-', '0023-', '0024-', '0027-', '0033-']
 
 
@@ -56,12 +57,31 @@ def source(name):
     return destination
 
 
+def apply_playback_patches(ff):
+    # Probe the patch itself rather than the old .patched marker: existing
+    # work directories predate these local security fixes.
+    for name in PLAYBACK_PATCHES:
+        patch = ROOT / 'playback' / name
+        # Check reverse first: an insertion-only patch may still apply forward
+        # after it is present, silently duplicating the security check.
+        reverse = ['patch', '-p1', '--batch', '--force', '--fuzz=0', '--reverse', '--dry-run', '-i', patch]
+        applied = subprocess.run(list(map(str, reverse)), cwd=ff,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if applied.returncode == 0:
+            continue
+        forward = ['patch', '-p1', '--batch', '--force', '--fuzz=0', '--forward', '-i', patch]
+        run([*forward, '--dry-run'], ff)
+        run(forward, ff)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--ndk', required=True, type=Path)
     parser.add_argument('--cmake-bin', required=True, type=Path)
     parser.add_argument('--meson', required=True, type=Path)
     parser.add_argument('--jobs', type=int, default=8)
+    parser.add_argument('--incremental-only', action='store_true',
+                        help='Reuse matching configured builds and installed dependencies')
     args = parser.parse_args()
     args.ndk = args.ndk.resolve()
     if f'Pkg.Revision = {NDK_VERSION}' not in (args.ndk / 'source.properties').read_text():
@@ -101,6 +121,7 @@ def main():
         (ff / '.patched').write_text(AVBUILD_REVISION)
     if not (ff / '.patched').exists():
         raise RuntimeError(f'Incomplete patching; inspect and remove {ff} before retrying')
+    apply_playback_patches(ff)
     flags = (ROOT / 'playback/ffmpeg.flags').read_text().splitlines()
     for abi, triple, family, cpu in [
         ('arm64-v8a', 'aarch64-linux-android', 'aarch64', 'aarch64'),
@@ -108,18 +129,20 @@ def main():
     ]:
         prefix = WORK / 'deps' / abi
         prefix.mkdir(parents=True, exist_ok=True)
-        wolf_build = WORK / ('wolfssl-' + abi)
-        run([cmake, '-S', src['wolfssl'], '-B', wolf_build, '-G', 'Ninja',
-             f'-DCMAKE_TOOLCHAIN_FILE={args.ndk}/build/cmake/android.toolchain.cmake',
-             f'-DANDROID_ABI={abi}', '-DANDROID_PLATFORM=android-21',
-             '-DCMAKE_BUILD_TYPE=MinSizeRel', '-DCMAKE_POSITION_INDEPENDENT_CODE=ON',
-             f'-DCMAKE_INSTALL_PREFIX={prefix}', '-DBUILD_SHARED_LIBS=OFF',
-             '-DWOLFSSL_EXAMPLES=no', '-DWOLFSSL_CRYPT_TESTS=no',
-             '-DWOLFSSL_OPENSSLEXTRA=yes'], env=env)
-        run([cmake, '--build', wolf_build, '--parallel', args.jobs], env=env)
-        run([cmake, '--install', wolf_build], env=env)
-        cross = WORK / (abi + '.ini')
-        cross.write_text(f"""[binaries]
+        if not args.incremental_only:
+            wolf_build = WORK / ('wolfssl-' + abi)
+            run([cmake, '-S', src['wolfssl'], '-B', wolf_build, '-G', 'Ninja',
+                 f'-DCMAKE_TOOLCHAIN_FILE={args.ndk}/build/cmake/android.toolchain.cmake',
+                 f'-DANDROID_ABI={abi}', '-DANDROID_PLATFORM=android-21',
+                 '-DCMAKE_BUILD_TYPE=MinSizeRel', '-DCMAKE_POSITION_INDEPENDENT_CODE=ON',
+                 f'-DCMAKE_INSTALL_PREFIX={prefix}', '-DBUILD_SHARED_LIBS=OFF',
+                 '-DWOLFSSL_EXAMPLES=no', '-DWOLFSSL_CRYPT_TESTS=no',
+                 '-DWOLFSSL_OPENSSLEXTRA=yes', '-DWOLFSSL_FILESYSTEM=yes',
+                 '-DWOLFSSL_ALT_CERT_CHAINS=yes', '-DWOLFSSL_SNI=yes'], env=env)
+            run([cmake, '--build', wolf_build, '--parallel', args.jobs], env=env)
+            run([cmake, '--install', wolf_build], env=env)
+            cross = WORK / (abi + '.ini')
+            cross.write_text(f"""[binaries]
 c = '{llvm}/{triple}21-clang'
 ar = '{llvm}/llvm-ar'
 strip = '{llvm}/llvm-strip'
@@ -131,13 +154,13 @@ endian = 'little'
 [built-in options]
 c_args = ['-fPIC']
 """)
-        dav_build = WORK / ('dav1d-' + abi)
-        if not (dav_build / 'build.ninja').exists():
-            run([args.meson.resolve(), 'setup', dav_build, src['dav1d'], '--cross-file', cross,
-                 '--prefix', prefix, '--libdir', 'lib', '--default-library', 'static',
-                 '--buildtype', 'minsize', '-Denable_tools=false', '-Denable_tests=false'], env=env)
-        run([args.meson.resolve(), 'compile', '-C', dav_build, '-j', args.jobs], env=env)
-        run([args.meson.resolve(), 'install', '-C', dav_build], env=env)
+            dav_build = WORK / ('dav1d-' + abi)
+            if not (dav_build / 'build.ninja').exists():
+                run([args.meson.resolve(), 'setup', dav_build, src['dav1d'], '--cross-file', cross,
+                     '--prefix', prefix, '--libdir', 'lib', '--default-library', 'static',
+                     '--buildtype', 'minsize', '-Denable_tools=false', '-Denable_tests=false'], env=env)
+            run([args.meson.resolve(), 'compile', '-C', dav_build, '-j', args.jobs], env=env)
+            run([args.meson.resolve(), 'install', '-C', dav_build], env=env)
         build = WORK / ('ffmpeg-' + abi)
         build.mkdir(exist_ok=True)
         ffenv = env.copy()
@@ -150,7 +173,21 @@ c_args = ['-fPIC']
                      f'--pkg-config={pkg_config}', '--pkg-config-flags=--static',
                      '--extra-cflags=-fPIC -ffunction-sections -fdata-sections',
                      '--extra-ldflags=-Wl,--no-undefined -Wl,--gc-sections -Wl,-z,max-page-size=16384 -Wl,--no-rosegment']
-        run(configure, build, ffenv)
+        if args.incremental_only:
+            wolf_options = (prefix / 'include/wolfssl/options.h').read_text()
+            if '#define HAVE_SNI' not in wolf_options:
+                raise RuntimeError(f'wolfSSL TLS server name indication is disabled for {abi}')
+            if '#define WOLFSSL_ALT_CERT_CHAINS' not in wolf_options:
+                raise RuntimeError(f'wolfSSL alternate trusted chains are disabled for {abi}')
+            if '#define NO_FILESYSTEM' in wolf_options:
+                raise RuntimeError(f'wolfSSL filesystem CA loading is disabled for {abi}')
+            previous = WORK / 'output' / abi / 'evidence/configure.json'
+            if not (build / 'ffbuild/config.mak').exists() or not previous.exists():
+                raise RuntimeError(f'Missing configured build for {abi}')
+            if json.loads(previous.read_text()) != list(map(str, configure)):
+                raise RuntimeError(f'Configuration changed for {abi}; use the regular build')
+        else:
+            run(configure, build, ffenv)
         run(['make', f'-j{args.jobs}'], build, ffenv)
         out = WORK / 'output' / abi
         run(['bash', ROOT / 'tools/mklibffmpeg.sh', build, out], build, ffenv)
@@ -161,9 +198,10 @@ c_args = ['-fPIC']
         (out / 'evidence/configure.json').write_text(json.dumps(list(map(str, configure)), indent=2))
     (WORK / 'output/sources.json').write_text(json.dumps(SOURCES, indent=2))
     recipe_files = [ROOT / 'playback/build.py', ROOT / 'playback/ffmpeg.flags', ROOT / 'tools/mklibffmpeg.sh']
+    recipe_files += [ROOT / 'playback' / name for name in PLAYBACK_PATCHES]
     recipe_files += [p for pattern in PATCHES for p in (ROOT / 'patches/master').glob(pattern + '*.patch')]
     manifest = {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for p in recipe_files}
-    manifest.update(ndk=NDK_VERSION, android_api=21, cmake='3.31.5', meson='1.7.2', upstream_avbuild=AVBUILD_REVISION)
+    manifest.update(ndk=NDK_VERSION, android_api=21, cmake='3.31.5', meson='1.7.2', upstream_avbuild=AVBUILD_REVISION, wolfssl_filesystem=True, wolfssl_alt_cert_chains=True, wolfssl_sni=True)
     (WORK / 'output/recipe.json').write_text(json.dumps(manifest, indent=2))
 
 
